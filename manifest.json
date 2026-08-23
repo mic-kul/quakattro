@@ -4,8 +4,10 @@
   "name": "Quakattro",
   "version": "0.1.0",
   "author": "mic-kul",
-  "description": "A raycaster in the walls of your window manager. Eat the apples, dodge the merchants of complexity, find Linux on the desktop.",
-  "kinds": ["overlay"],
+  "description": "A raycaster for Omarchy Quattro. The walls are tiled with your window manager's dwindle layout, the enemies are merchants of complexity, and the holy grail is Linux on the desktop.",
+  "kinds": [
+    "overlay"
+  ],
   "keepLoaded": true,
   "entryPoints": {
     "overlay": "Quakattro.qml"

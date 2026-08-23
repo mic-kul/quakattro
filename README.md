@@ -1,8 +1,8 @@
 # Quakattro
 
-A raycaster for [Omarchy](https://omarchy.org). The walls are tiled with your
-window manager's dwindle layout, the enemies are merchants of complexity, and
-the holy grail is a penguin on a desk.
+A raycaster for [Omarchy Quattro](https://omarchy.org). The walls are tiled
+with your window manager's dwindle layout, the enemies are merchants of
+complexity, and the holy grail is Linux on the desktop.
 
 Eat every apple. Each one is a thing you no longer need, and putting it down
 makes you twice as fast for ten seconds. The merchants sell you the cloud;
