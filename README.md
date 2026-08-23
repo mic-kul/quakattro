@@ -4,9 +4,10 @@ A raycaster for [Omarchy](https://omarchy.org). The walls are tiled with your
 window manager's dwindle layout, the enemies are merchants of complexity, and
 the holy grail is a penguin on a desk.
 
-Eat every apple. Each one is a thing you no longer need. The merchants will
-sell you the cloud, and you will drop what you were carrying. The grail does
-not open for the cluttered.
+Eat every apple. Each one is a thing you no longer need, and putting it down
+makes you twice as fast for ten seconds. The merchants sell you the cloud;
+carrying one makes you four times slower for ten. A merchant that has made its
+sale is done and leaves. The grail does not open for the cluttered.
 
 There is no mouse. Clicking one ends the run.
 

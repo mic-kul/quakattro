@@ -39,6 +39,12 @@ Item {
     property var merchants: []
     property int eaten: 0
     property int complexity: 0
+    readonly property int merchantsLeft: {
+        var n = 0;
+        for (var i = 0; i < merchants.length; ++i)
+            if (merchants[i].alive) ++n;
+        return n;
+    }
     property bool won: false
     property bool dead: false
     property bool helpOpen: false
@@ -51,6 +57,19 @@ Item {
     property real replan: 0
 
     readonly property color ink: "#c8b48a"
+
+    // Seconds left on each effect. Long enough to feel, short enough that
+    // neither one decides the run.
+    readonly property real effectSeconds: 10.0
+    // Focusing a window can deliver a press. Give the player a moment to
+    // arrive before the mouse becomes fatal, or alt-tabbing in kills them.
+    property real armed: 0
+    property real lighter: 0
+    property real heavier: 0
+
+    // Put something down and you move twice as fast. Get sold a cloud and you
+    // carry it at a quarter pace.
+    readonly property real pace: (lighter > 0 ? 2.0 : 1.0) / (heavier > 0 ? 4.0 : 1.0)
     readonly property bool paused: helpOpen || consoleOpen || won || dead
 
     // ---- maze -------------------------------------------------------------
@@ -90,16 +109,17 @@ Item {
         posX = Maze.START[0]; posY = Maze.START[1];
         dirX = 1; dirY = 0; planeX = 0; planeY = 0.66;
         eaten = 0; complexity = 0; won = false; dead = false; flash = ""; route = [];
+        lighter = 0; heavier = 0; armed = 0;
         var a = [];
         for (var i = 0; i < Maze.APPLES.length; ++i)
             a.push({ x: Maze.APPLES[i][0], y: Maze.APPLES[i][1], alive: 1, phase: i * 1.7 });
-        apples = a;
+        apples = a.slice();
         var m = [];
         for (var j = 0; j < 3; ++j) {
             var c = openCell();
             m.push({ x: c[0], y: c[1], alive: 1, phase: j * 2.3 });
         }
-        merchants = m;
+        merchants = m.slice();
     }
 
     Component.onCompleted: reset()
@@ -144,6 +164,8 @@ Item {
         // straight route and accept the toll.
         var avoid = {};
         for (var i = 0; i < merchants.length; ++i) {
+            if (!merchants[i].alive)
+                continue;
             var mx = Math.floor(merchants[i].x), my = Math.floor(merchants[i].y);
             for (var dx = -1; dx <= 1; ++dx)
                 for (var dy = -1; dy <= 1; ++dy)
@@ -194,7 +216,7 @@ Item {
         turn(Math.max(-rate, Math.min(rate, diff)));
 
         // Slow into the corners rather than grinding along the wall.
-        var speed = 3.0 * dt * Math.max(0.15, 1.0 - Math.abs(diff) / 1.4);
+        var speed = 3.0 * root.pace * dt * Math.max(0.15, 1.0 - Math.abs(diff) / 1.4);
         var me = { x: posX, y: posY };
         slide(me, dirX * speed, dirY * speed, 0.2);
         posX = me.x; posY = me.y;
@@ -256,12 +278,20 @@ Item {
         property vector4d merchant2: root.vec(root.merchants[2])
     }
 
-    // The mouse is not an input device here. Touching it ends the run.
+    // The mouse is not an input device here. Using one ends the run.
+    //
+    // It has to be a deliberate press, though. Focusing a window synthesises
+    // one, and having the window manager end your game for you is not the
+    // joke. So the trap only arms once the pointer has actually moved inside
+    // the window, which a person does and a focus event does not.
     MouseArea {
         anchors.fill: parent
         acceptedButtons: Qt.AllButtons
+        hoverEnabled: true
+        property bool pointerMoved: false
+        onPositionChanged: pointerMoved = true
         onPressed: function (event) {
-            if (!root.won)
+            if (!root.won && pointerMoved && root.armed > 0.75)
                 root.dead = true;
             event.accepted = true;
         }
@@ -277,10 +307,14 @@ Item {
             root.fps = root.fps * 0.9 + (1 / Math.max(frameTime, 1e-4)) * 0.1;
             root.torch = 0.94 + 0.06 * Math.sin(elapsedTime * 13)
                              + 0.03 * Math.sin(elapsedTime * 41);
+            root.armed += dt;
+            root.lighter = Math.max(0, root.lighter - dt);
+            root.heavier = Math.max(0, root.heavier - dt);
+
             if (root.godmode) {
                 root.autopilot(dt);
             } else {
-                var speed = (held[Qt.Key_Shift] ? 4.6 : 2.7) * dt;
+                var speed = (held[Qt.Key_Shift] ? 4.6 : 2.7) * root.pace * dt;
                 var rot = 2.1 * dt;
                 var me = { x: root.posX, y: root.posY };
                 if (held[Qt.Key_W]) root.slide(me, root.dirX * speed, root.dirY * speed, 0.2);
@@ -296,38 +330,34 @@ Item {
             for (var i = 0; i < a.length; ++i) {
                 if (a[i].alive && Math.hypot(a[i].x - root.posX, a[i].y - root.posY) < 0.45) {
                     a[i].alive = 0; root.eaten++; ate = true;
-                    root.flash = "simplicity +1";
+                    root.lighter = root.effectSeconds;
+                    root.flash = "simplicity +1 — lighter on your feet";
                     root.route = [];
                 }
             }
-            if (ate) root.apples = a;
+            if (ate) root.apples = a.slice();
 
             var m = root.merchants, bumped = false;
             for (var j = 0; j < m.length; ++j) {
+                if (!m[j].alive)
+                    continue;
                 var toX = root.posX - m[j].x, toY = root.posY - m[j].y;
                 var d = Math.hypot(toX, toY) || 1;
                 root.slide(m[j], (toX / d) * 1.35 * dt, (toY / d) * 1.35 * dt, 0.25);
                 if (d < 0.55) {
-                    // They do not kill you. They sell you the cloud, and you
-                    // walk away carrying more than you came with.
+                    // It made its sale. It has nothing else to offer, so it
+                    // goes, and what you were carrying stays carried.
                     root.complexity++;
-                    root.flash = "a merchant sold you the cloud";
+                    root.heavier = root.effectSeconds;
+                    root.flash = "a merchant sold you the cloud — now carry it";
                     root.posX -= (toX / d) * 0.7; root.posY -= (toY / d) * 0.7;
-                    for (var k = 0; k < a.length; ++k) {
-                        if (!a[k].alive) {
-                            var c = root.openCell();
-                            a[k].x = c[0]; a[k].y = c[1]; a[k].alive = 1;
-                            root.eaten--; break;
-                        }
-                    }
-                    var far = root.openCell();
-                    m[j].x = far[0]; m[j].y = far[1];
+                    m[j].alive = 0;
                     bumped = true;
                     root.route = [];
                 }
             }
-            root.merchants = m;
-            if (bumped) root.apples = a;
+            root.merchants = m.slice();
+            if (bumped) root.apples = a.slice();
 
             if (Math.hypot(Maze.GRAIL[0] - root.posX, Maze.GRAIL[1] - root.posY) < 0.6) {
                 if (root.eaten === a.length)
@@ -371,6 +401,10 @@ Item {
         lineHeight: 1.35
         text: "apples  " + root.eaten + " / " + root.apples.length
               + "\ncomplexity  " + root.complexity
+              + "\nmerchants  " + root.merchantsLeft
+              + "\npace  " + root.pace.toFixed(2) + "x"
+                    + (root.lighter > 0 ? "  light " + Math.ceil(root.lighter) + "s" : "")
+                    + (root.heavier > 0 ? "  heavy " + Math.ceil(root.heavier) + "s" : "")
               + "\n" + Math.round(root.fps) + " fps"
     }
 
@@ -463,6 +497,8 @@ Item {
                 + "?  /  F1    this help\n"
                 + "Esc         close, then quit\n\n"
                 + "The mouse is not an input device here.\n\n"
+                + "An apple makes you twice as fast for ten seconds.\n"
+                + "A cloud makes you four times slower for ten.\n\n"
                 + "Eat every apple. Each one is a thing you no longer need.\n"
                 + "Avoid the merchants of complexity — they will sell you\n"
                 + "the cloud, and you will drop what you were carrying.\n\n"
