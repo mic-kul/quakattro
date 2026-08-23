@@ -1,0 +1,18 @@
+#!/usr/bin/env sh
+# Bakes the fragment shader. Qt 6 will not load raw GLSL; ShaderEffect wants a
+# .qsb, produced by qsb from the qt6-shadertools package.
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+
+if command -v qsb >/dev/null 2>&1; then
+  QSB=qsb
+elif [ -x /usr/lib/qt6/bin/qsb ]; then
+  QSB=/usr/lib/qt6/bin/qsb
+else
+  echo "qsb is required (install qt6-shadertools)." >&2
+  exit 1
+fi
+
+"$QSB" --qt6 -o "$ROOT/raycast.frag.qsb" "$ROOT/raycast.frag"
+echo "Baked $ROOT/raycast.frag.qsb"
