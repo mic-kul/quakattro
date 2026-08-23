@@ -19,7 +19,9 @@ layout(std140, binding = 0) uniform buf {
     vec4 merchant0; vec4 merchant1; vec4 merchant2;
 };
 
-// Generated maze; tools/build rebuilds this and maze.js together.
+// >>> generated map -- tools/build-maze.py writes everything between these
+// markers. Do not edit by hand; it will be overwritten.
+const int MAPN = 21;
 const int MAP[21] = int[21](
     0x1FFFFF, 0x100011, 0x1D5AF7, 0x105001,
     0x15F7FD, 0x151001, 0x17595D, 0x105115,
@@ -28,9 +30,10 @@ const int MAP[21] = int[21](
     0x1515F5, 0x115405, 0x1F77D1, 0x100005,
     0x1FFFFF
 );
+// <<< generated map
 
 int tileAt(int x, int y) {
-    if (x < 0 || x > 20 || y < 0 || y > 20)
+    if (x < 0 || x >= MAPN || y < 0 || y >= MAPN)
         return 1;
     return (MAP[y] >> x) & 1;
 }
@@ -47,7 +50,6 @@ float hash(vec2 p) {
 vec3 dwindle(vec2 uv, bool sideWall) {
     vec2 lo = vec2(0.0), hi = vec2(1.0);
     bool vertical = true;   // first split is a vertical line, as in a fresh workspace
-    int depth = 0;
 
     for (int i = 0; i < 11; ++i) {
         vec2 mid = (lo + hi) * 0.5;
@@ -64,7 +66,6 @@ vec3 dwindle(vec2 uv, bool sideWall) {
             if (inLow) hi.y = mid.y; else lo.y = mid.y;
         }
         vertical = !vertical;
-        depth = i + 1;
     }
 
     vec2 size = max(hi - lo, vec2(1e-4));
@@ -141,10 +142,6 @@ vec4 shape(int kind, vec2 p) {
     }
 
     // The grail, literally: a penguin, on a desk.
-    float ell;
-    float d = 1e9;
-    vec3 c = vec3(0.0);
-
     // Desk: a top and two legs.
     float deskTop = sdBox(p - vec2(0.0, 0.60), vec2(0.66, 0.055));
     float legs = min(sdBox(p - vec2(-0.50, 0.82), vec2(0.055, 0.20)),
@@ -158,14 +155,12 @@ vec4 shape(int kind, vec2 p) {
     float bird = min(body, head);
 
     // Flippers.
-    // No flippers. A normalised-ellipse field is not a true distance, so
-    // unioning one into the body left a ring the rim-light traced.
 
-    d = min(desk, bird);
+    float d = min(desk, bird);
     float a = smoothstep(0.05, -0.02, d);
 
     // Colour it up, nearest feature last.
-    c = mix(vec3(0.30, 0.20, 0.12), vec3(0.46, 0.31, 0.18),
+    vec3 c = mix(vec3(0.30, 0.20, 0.12), vec3(0.46, 0.31, 0.18),
             smoothstep(0.7, 0.4, p.y));                      // desk, lit from above
     c = mix(c, vec3(0.07, 0.07, 0.09), smoothstep(0.03, -0.02, bird));
 
@@ -187,35 +182,24 @@ vec4 shape(int kind, vec2 p) {
     return vec4(c, a);
 }
 
-// A billboard, drawn in camera space. xy is the world cell, z is 1 while it is
-// still there, w is a phase offset so they do not all bob in unison.
-struct Hit { float depth; vec3 colour; float alpha; };
+// A billboard. QML has already done the camera transform -- every step of it
+// derived from uniforms alone, so computing it per pixel was five million
+// answers to the same question. What arrives is where it lands on screen:
+// xy centre, z half-size, w depth, with w <= 0 meaning gone or behind us.
+void sprite(inout vec3 colour, vec4 s, vec2 uv, int kind, float wall) {
+    if (s.w <= 0.0 || s.w >= wall)
+        return;
 
-Hit sprite(vec4 s, vec2 uv, vec2 pos, vec2 dir, vec2 plane, int kind, float radius) {
-    Hit none = Hit(1e9, vec3(0.0), 0.0);
-    if (s.z < 0.5)
-        return none;
-
-    vec2 rel = s.xy - pos;
-    float invDet = 1.0 / (plane.x * dir.y - dir.x * plane.y);
-    float tx = invDet * (dir.y * rel.x - dir.x * rel.y);
-    float depth = invDet * (-plane.y * rel.x + plane.x * rel.y);
-    if (depth < 0.12)
-        return none;
-
-    float screenX = 0.5 * (1.0 + tx / depth);
-    float scale = radius / depth;
-    float bob = 0.05 * sin(s.w + torch * 3.0);
-    float screenY = 0.5 + (0.14 + bob) / depth;
-
-    vec2 p = vec2((uv.x - screenX) / scale, (uv.y - screenY) / scale);
+    vec2 p = (uv - s.xy) / s.z;
     if (abs(p.x) > 1.2 || abs(p.y) > 1.2)
-        return none;
+        return;
 
     vec4 shaded = shape(kind, p);
     if (shaded.a <= 0.001)
-        return none;
-    return Hit(depth, shaded.rgb, shaded.a);
+        return;
+
+    float glow = 1.0 / (1.0 + s.w * s.w * 0.10);
+    colour = mix(colour, shaded.rgb * clamp(glow, 0.25, 1.6), shaded.a);
 }
 
 void main() {
@@ -278,34 +262,25 @@ void main() {
         depth = rowDist;
     }
 
-    // Sprites, nearest first, drawn over the world where they are closer than
-    // the wall behind them.
-    Hit hits[12];
-    hits[0] = sprite(apple0, uv, pos, dir, plane, 0, 0.13);
-    hits[1] = sprite(apple1, uv, pos, dir, plane, 0, 0.13);
-    hits[2] = sprite(apple2, uv, pos, dir, plane, 0, 0.13);
-    hits[3] = sprite(apple3, uv, pos, dir, plane, 0, 0.13);
-    hits[4] = sprite(apple4, uv, pos, dir, plane, 0, 0.13);
-    hits[5] = sprite(apple5, uv, pos, dir, plane, 0, 0.13);
-    hits[6] = sprite(apple6, uv, pos, dir, plane, 0, 0.13);
-    hits[7] = sprite(apple7, uv, pos, dir, plane, 0, 0.13);
-    hits[8] = sprite(grail,  uv, pos, dir, plane, 2, 0.20);
-    // The merchants themselves. They are, of course, clouds.
-    hits[9]  = sprite(merchant0, uv, pos, dir, plane, 1, 0.26);
-    hits[10] = sprite(merchant1, uv, pos, dir, plane, 1, 0.26);
-    hits[11] = sprite(merchant2, uv, pos, dir, plane, 1, 0.26);
-
     // Torchlight falloff. Quake's whole look is darkness with a lamp in it.
     float light = torch / (1.0 + depth * depth * 0.28);
     colour *= clamp(light, 0.05, 1.4);
     colour = mix(colour, vec3(0.03, 0.03, 0.05), clamp(depth * 0.055, 0.0, 0.85));
 
-    for (int i = 0; i < 12; ++i) {
-        if (hits[i].alpha > 0.0 && hits[i].depth < depth) {
-            float glow = 1.0 / (1.0 + hits[i].depth * hits[i].depth * 0.10);
-            colour = mix(colour, hits[i].colour * clamp(glow, 0.25, 1.6), hits[i].alpha);
-        }
-    }
+    // Sprites go over the lit world, in index order, each one only where it is
+    // closer than the wall behind it.
+    sprite(colour, apple0, uv, 0, depth);
+    sprite(colour, apple1, uv, 0, depth);
+    sprite(colour, apple2, uv, 0, depth);
+    sprite(colour, apple3, uv, 0, depth);
+    sprite(colour, apple4, uv, 0, depth);
+    sprite(colour, apple5, uv, 0, depth);
+    sprite(colour, apple6, uv, 0, depth);
+    sprite(colour, apple7, uv, 0, depth);
+    sprite(colour, grail, uv, 2, depth);
+    sprite(colour, merchant0, uv, 1, depth);
+    sprite(colour, merchant1, uv, 1, depth);
+    sprite(colour, merchant2, uv, 1, depth);
 
     fragColor = vec4(pow(colour, vec3(0.85)), 1.0) * qt_Opacity;
 }

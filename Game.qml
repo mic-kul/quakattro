@@ -4,15 +4,20 @@ import "maze.js" as Maze
 // The game itself, with no opinion about the surface it is drawn on. The
 // standalone runner puts it in a Window; the Omarchy plugin puts it in a
 // layer-shell overlay.
-Item {
+FocusScope {
     id: root
-    anchors.fill: parent
 
     // False while the overlay is closed, which stops the frame loop dead.
     property bool active: false
     signal exitRequested()
 
     // omawrite ships iA Writer Mono S; nobody else has to.
+    //
+    // QML's font value type has no "families" -- that is C++-only API -- so the
+    // list has to be walked by hand, and Qt.fontFamilies() enumerates every
+    // installed family to do it, about 27ms. That is paid once when you summon
+    // the game, not at shell startup, because the manifest asks not to be kept
+    // loaded.
     readonly property string mono: {
         var wanted = ["iA Writer Mono S", "JetBrainsMono Nerd Font", "JetBrains Mono",
                       "Fira Code", "Hack", "DejaVu Sans Mono", "monospace"];
@@ -39,12 +44,8 @@ Item {
     property var merchants: []
     property int eaten: 0
     property int complexity: 0
-    readonly property int merchantsLeft: {
-        var n = 0;
-        for (var i = 0; i < merchants.length; ++i)
-            if (merchants[i].alive) ++n;
-        return n;
-    }
+    readonly property int merchantSlots: 3
+    readonly property int merchantsLeft: merchants.length - complexity
     property bool won: false
     property bool dead: false
     property bool helpOpen: false
@@ -57,13 +58,11 @@ Item {
     property real replan: 0
 
     readonly property color ink: "#c8b48a"
+    readonly property var grailMarker: ({ x: Maze.GRAIL[0], y: Maze.GRAIL[1], alive: 1, phase: 0.4 })
 
     // Seconds left on each effect. Long enough to feel, short enough that
     // neither one decides the run.
     readonly property real effectSeconds: 10.0
-    // Focusing a window can deliver a press. Give the player a moment to
-    // arrive before the mouse becomes fatal, or alt-tabbing in kills them.
-    property real armed: 0
     property real lighter: 0
     property real heavier: 0
 
@@ -82,13 +81,27 @@ Item {
 
     function solid(x, y) { return solidCell(Math.floor(x), Math.floor(y)); }
 
+    // Every open cell, worked out once. Rejection sampling for a spot far from
+    // the player used to be a while(true), which is a poor thing to run inside
+    // a desktop shell: a maze with nowhere far enough away would hang it.
+    readonly property var floorCells: {
+        var out = [];
+        for (var y = 0; y < Maze.N; ++y)
+            for (var x = 0; x < Maze.N; ++x)
+                if (!solidCell(x, y))
+                    out.push([x + 0.5, y + 0.5]);
+        return out;
+    }
+
     function openCell() {
-        while (true) {
-            var x = 1 + Math.floor(Math.random() * (Maze.N - 2));
-            var y = 1 + Math.floor(Math.random() * (Maze.N - 2));
-            if (!solidCell(x, y) && Math.abs(x - posX) + Math.abs(y - posY) > 6)
-                return [x + 0.5, y + 0.5];
+        var fallback = floorCells[0];
+        for (var tries = 0; tries < 24; ++tries) {
+            var c = floorCells[Math.floor(Math.random() * floorCells.length)];
+            if (Math.abs(c[0] - posX) + Math.abs(c[1] - posY) > 6)
+                return c;
+            fallback = c;
         }
+        return fallback;
     }
 
     // Try each axis separately so a wall slides you along instead of stopping you.
@@ -109,13 +122,13 @@ Item {
         posX = Maze.START[0]; posY = Maze.START[1];
         dirX = 1; dirY = 0; planeX = 0; planeY = 0.66;
         eaten = 0; complexity = 0; won = false; dead = false; flash = ""; route = [];
-        lighter = 0; heavier = 0; armed = 0;
+        lighter = 0; heavier = 0;
         var a = [];
         for (var i = 0; i < Maze.APPLES.length; ++i)
             a.push({ x: Maze.APPLES[i][0], y: Maze.APPLES[i][1], alive: 1, phase: i * 1.7 });
         apples = a.slice();
         var m = [];
-        for (var j = 0; j < 3; ++j) {
+        for (var j = 0; j < merchantSlots; ++j) {
             var c = openCell();
             m.push({ x: c[0], y: c[1], alive: 1, phase: j * 2.3 });
         }
@@ -124,8 +137,26 @@ Item {
 
     Component.onCompleted: reset()
 
-    function vec(o) {
-        return o ? Qt.vector4d(o.x, o.y, o.alive, o.phase) : Qt.vector4d(0, 0, 0, 0);
+    // Where a billboard lands on screen: xy centre, z half-size, w depth.
+    // w <= 0 means gone, or behind the camera, and the shader skips it.
+    readonly property vector4d nowhere: Qt.vector4d(0, 0, 0, -1)
+
+    function billboard(o, radius) {
+        if (!o || o.alive < 0.5)
+            return nowhere;
+
+        var relX = o.x - posX, relY = o.y - posY;
+        var invDet = 1.0 / (planeX * dirY - dirX * planeY);
+        var depth = invDet * (-planeY * relX + planeX * relY);
+        if (depth < 0.12)
+            return nowhere;
+
+        var tx = invDet * (dirY * relX - dirX * relY);
+        var bob = 0.05 * Math.sin(o.phase + torch * 3.0);
+        return Qt.vector4d(0.5 * (1.0 + tx / depth),
+                           0.5 + (0.14 + bob) / depth,
+                           radius / depth,
+                           depth);
     }
 
     // ---- autopilot --------------------------------------------------------
@@ -200,8 +231,7 @@ Item {
         var wx = route[0][0] + 0.5, wy = route[0][1] + 0.5;
         if (Math.hypot(wx - posX, wy - posY) < 0.3) {
             route.shift();
-            route = route;
-            if (route.length === 0)
+                if (route.length === 0)
                 return;
             wx = route[0][0] + 0.5; wy = route[0][1] + 0.5;
         }
@@ -257,6 +287,14 @@ Item {
     ShaderEffect {
         anchors.fill: parent
         fragmentShader: "raycast.frag.qsb"
+        // Without this a bad or missing .qsb is a black fullscreen surface that
+        // holds the keyboard and refuses the mouse on purpose. Hand it back.
+        onStatusChanged: {
+            if (status === ShaderEffect.Error) {
+                console.warn("quakattro: shader failed to load\n" + log);
+                root.exitRequested();
+            }
+        }
         property real posX: root.posX
         property real posY: root.posY
         property real dirX: root.dirX
@@ -264,18 +302,18 @@ Item {
         property real planeX: root.planeX
         property real planeY: root.planeY
         property real torch: root.torch
-        property vector4d apple0: root.vec(root.apples[0])
-        property vector4d apple1: root.vec(root.apples[1])
-        property vector4d apple2: root.vec(root.apples[2])
-        property vector4d apple3: root.vec(root.apples[3])
-        property vector4d apple4: root.vec(root.apples[4])
-        property vector4d apple5: root.vec(root.apples[5])
-        property vector4d apple6: root.vec(root.apples[6])
-        property vector4d apple7: root.vec(root.apples[7])
-        property vector4d grail: Qt.vector4d(Maze.GRAIL[0], Maze.GRAIL[1], 1, 0.4)
-        property vector4d merchant0: root.vec(root.merchants[0])
-        property vector4d merchant1: root.vec(root.merchants[1])
-        property vector4d merchant2: root.vec(root.merchants[2])
+        property vector4d apple0: root.billboard(root.apples[0], 0.13)
+        property vector4d apple1: root.billboard(root.apples[1], 0.13)
+        property vector4d apple2: root.billboard(root.apples[2], 0.13)
+        property vector4d apple3: root.billboard(root.apples[3], 0.13)
+        property vector4d apple4: root.billboard(root.apples[4], 0.13)
+        property vector4d apple5: root.billboard(root.apples[5], 0.13)
+        property vector4d apple6: root.billboard(root.apples[6], 0.13)
+        property vector4d apple7: root.billboard(root.apples[7], 0.13)
+        property vector4d grail: root.billboard(root.grailMarker, 0.20)
+        property vector4d merchant0: root.billboard(root.merchants[0], 0.26)
+        property vector4d merchant1: root.billboard(root.merchants[1], 0.26)
+        property vector4d merchant2: root.billboard(root.merchants[2], 0.26)
     }
 
     // The mouse is not an input device here. Using one ends the run.
@@ -288,10 +326,21 @@ Item {
         anchors.fill: parent
         acceptedButtons: Qt.AllButtons
         hoverEnabled: true
+        // Arm on displacement, never on a timer. A hovered surface receives a
+        // position when the pointer merely enters it under a still cursor, and
+        // focusing a window synthesises a press -- neither is a person reaching
+        // for the mouse, and a stopwatch cannot tell the difference.
+        property real lastX: -1
+        property real lastY: -1
         property bool pointerMoved: false
-        onPositionChanged: pointerMoved = true
+        onPositionChanged: function (event) {
+            if (lastX >= 0 && Math.abs(event.x - lastX) + Math.abs(event.y - lastY) > 8)
+                pointerMoved = true;
+            lastX = event.x;
+            lastY = event.y;
+        }
         onPressed: function (event) {
-            if (!root.won && pointerMoved && root.armed > 0.75)
+            if (!root.won && pointerMoved)
                 root.dead = true;
             event.accepted = true;
         }
@@ -303,11 +352,23 @@ Item {
         // burn a core behind your bar.
         running: root.active && !root.paused
         onTriggered: {
+            try {
+                root.step(frameTime, elapsedTime);
+            } catch (e) {
+                // Logging this every frame for the life of the session is the
+                // real hazard inside a shell, not the throw itself.
+                console.warn("quakattro: stopping after an error in the frame loop\n" + e);
+                running = false;
+                root.exitRequested();
+            }
+        }
+    }
+
+    function step(frameTime, elapsedTime) {
             var dt = Math.min(frameTime, 0.05);
             root.fps = root.fps * 0.9 + (1 / Math.max(frameTime, 1e-4)) * 0.1;
             root.torch = 0.94 + 0.06 * Math.sin(elapsedTime * 13)
                              + 0.03 * Math.sin(elapsedTime * 41);
-            root.armed += dt;
             root.lighter = Math.max(0, root.lighter - dt);
             root.heavier = Math.max(0, root.heavier - dt);
 
@@ -337,7 +398,7 @@ Item {
             }
             if (ate) root.apples = a.slice();
 
-            var m = root.merchants, bumped = false;
+            var m = root.merchants;
             for (var j = 0; j < m.length; ++j) {
                 if (!m[j].alive)
                     continue;
@@ -352,12 +413,10 @@ Item {
                     root.flash = "a merchant sold you the cloud — now carry it";
                     root.posX -= (toX / d) * 0.7; root.posY -= (toY / d) * 0.7;
                     m[j].alive = 0;
-                    bumped = true;
                     root.route = [];
                 }
             }
             root.merchants = m.slice();
-            if (bumped) root.apples = a.slice();
 
             if (Math.hypot(Maze.GRAIL[0] - root.posX, Maze.GRAIL[1] - root.posY) < 0.6) {
                 if (root.eaten === a.length)
@@ -366,7 +425,6 @@ Item {
                     root.flash = "the grail is not for the cluttered — "
                               + (a.length - root.eaten) + " apples remain";
             }
-        }
     }
 
     Timer { interval: 2200; running: root.flash !== ""; onTriggered: root.flash = "" }
@@ -386,10 +444,9 @@ Item {
             } else {
                 held[e.key] = true;
             }
-            held = held;
             e.accepted = true;
         }
-        Keys.onReleased: function (e) { held[e.key] = false; held = held; e.accepted = true; }
+        Keys.onReleased: function (e) { held[e.key] = false; e.accepted = true; }
     }
 
     // ---- chrome -----------------------------------------------------------

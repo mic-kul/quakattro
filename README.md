@@ -70,14 +70,24 @@ and reload the shell.
 Both generated files are committed; rebuild them only if you change the source.
 
 ```sh
-bin/build              # bakes raycast.frag -> raycast.frag.qsb (needs qt6-shadertools)
-tools/build-maze.py    # regenerates the maze
+tools/build-maze.py         # writes the map into raycast.frag and maze.js
+bin/build                   # bakes raycast.frag -> .qsb (needs qt6-shadertools)
 omarchy plugin validate .   # checks the manifest against the shell's own schema
 ```
 
+Run them in that order; the maze builder edits the shader, so the bake has to
+follow it. Both are idempotent: running them without changing anything leaves
+no diff, which is the check worth putting in CI.
+
 The maze generator seeds from a constant, so a given release always plays the
-same maze. Pass a seed to get a different one. It writes both files in one go
-because the shader and the collision have to agree about where the walls are.
+same maze. Pass a seed to get a different one.
+
+GLSL has no `#include`, so the renderer's copy of the map cannot be a separate
+file — it lives inside `raycast.frag` between two markers, and the generator
+rewrites it there. That is the whole reason the generator touches the shader:
+the map the renderer draws and the map collision believes have to be written
+by the same program, or the first seed change gives you walls you can walk
+through.
 
 ## How it works
 

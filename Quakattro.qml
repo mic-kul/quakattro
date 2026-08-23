@@ -4,8 +4,11 @@ import QtQuick
 
 // Omarchy plugin entry point, overlay kind.
 //
-// Plugins share the long-running Omarchy shell process, so two rules govern
-// everything here: never quit the process, and never render while closed.
+// Plugins share the long-running Omarchy shell process, so everything here
+// follows from two rules: never quit the process, and never render while
+// closed. The manifest asks not to be kept loaded, so nothing of the game --
+// scene graph, shader pipeline, frame timer -- exists in your shell until you
+// summon it. A maze regenerates in microseconds; there is nothing to warm.
 Item {
     id: root
 
@@ -14,6 +17,17 @@ Item {
     property bool opened: false
 
     function open(payloadJson) {
+        // The payload is ignored, but parsing it keeps a malformed one from
+        // throwing across the host's boundary.
+        try {
+            if (payloadJson)
+                JSON.parse(payloadJson);
+        } catch (e) {
+            console.warn("quakattro: ignoring unparseable payload");
+        }
+        // A finished run should not be what greets you next time.
+        if (game.won || game.dead)
+            game.reset();
         root.opened = true;
         Qt.callLater(function () { game.forceActiveFocus(); });
     }
