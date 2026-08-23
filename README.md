@@ -34,23 +34,36 @@ and around the merchants; `/reset`, `/where`, `/help`.
 ## Install as an Omarchy plugin
 
 ```sh
-git clone https://github.com/mic-kul/quakattro ~/.config/omarchy/plugins/quakattro
-omarchy-shell shell listPlugins        # it should be listed
+omarchy plugin add https://github.com/mic-kul/quakattro.git --enable
 ```
 
-Bind it in `~/.config/hypr/bindings.conf`:
+Then bind it in `~/.config/hypr/bindings.conf`:
 
 ```
 bindd = SUPER SHIFT, Q, Quakattro, exec, omarchy-shell -q shell toggle quakattro
 ```
 
-Plugins share the long-running Omarchy shell process, so two things matter and
-both are handled here: the frame loop stops dead when the overlay is closed
-(`active: root.opened`), and `Esc` calls `dismiss()` rather than quitting —
-`Qt.quit()` in a plugin would take down your bar, notifications, OSD and lock
-screen with it.
+`omarchy plugin list` shows what is installed, and `omarchy plugin disable
+quakattro` turns it off without removing it.
 
-Test in a nested Hyprland before pointing it at your live session.
+## Remove it
+
+```sh
+omarchy plugin remove quakattro
+```
+
+That disables the plugin in the running shell and deletes
+`~/.config/omarchy/plugins/quakattro`. Two things it cannot do for you:
+
+- **Delete the keybind.** Remove the `bindd` line you added from
+  `~/.config/hypr/bindings.conf`, or the key will run a toggle for a plugin
+  that is no longer there.
+- **Reach outside its own directory.** Quakattro writes nothing anywhere else
+  — no config, no save file, no cache — so once the directory and the keybind
+  are gone, nothing of it remains.
+
+If you installed it by hand instead, `rm -rf ~/.config/omarchy/plugins/quakattro`
+and reload the shell.
 
 ## Build
 
@@ -58,7 +71,8 @@ Both generated files are committed; rebuild them only if you change the source.
 
 ```sh
 bin/build              # bakes raycast.frag -> raycast.frag.qsb (needs qt6-shadertools)
-tools/build-maze.py    # regenerates maze.glsl and maze.js together
+tools/build-maze.py    # regenerates the maze
+omarchy plugin validate .   # checks the manifest against the shell's own schema
 ```
 
 The maze generator seeds from a constant, so a given release always plays the
