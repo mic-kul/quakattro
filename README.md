@@ -11,9 +11,11 @@ sale is done and leaves. The grail does not open for the cluttered.
 
 There is no mouse. Clicking one ends the run.
 
-## Run it
+## Play it without installing
 
 ```sh
+git clone https://github.com/mic-kul/quakattro
+cd quakattro
 qml6 Standalone.qml
 ```
 
@@ -37,21 +39,43 @@ and around the merchants; `/reset`, `/where`, `/help`.
 omarchy plugin add https://github.com/mic-kul/quakattro.git --enable
 ```
 
-Then bind it in `~/.config/hypr/bindings.conf`:
+Check it registered:
 
-```
-bindd = SUPER SHIFT, Q, Quakattro, exec, omarchy-shell -q shell toggle quakattro '{}'
+```sh
+omarchy plugin list | grep quakattro
 ```
 
-The `'{}'` is not optional — the shell's IPC method is `toggle(id, payload)`,
-and leaving the payload off silently does nothing. To try it without a keybind:
+You should see `quakattro   enabled   third-party   overlay   Quakattro`.
+
+## Launch it
 
 ```sh
 omarchy-shell shell toggle quakattro '{}'
 ```
 
-`omarchy plugin list` shows what is installed, and `omarchy plugin disable
-quakattro` turns it off without removing it.
+Run that once to make sure it opens; run it again to close. **The `'{}'` is
+required.** The shell's IPC method is `toggle(id, payload)`, and calling it
+with only the id exits 0 and does nothing at all.
+
+Then give it a key. Add this to `~/.config/hypr/bindings.conf`:
+
+```
+bindd = SUPER SHIFT, Q, Quakattro, exec, omarchy-shell -q shell toggle quakattro '{}'
+```
+
+Hyprland reloads its config on save, so the key works immediately — if you have
+autoreload turned off, `hyprctl reload`. The `-q` makes the binding fail quietly
+if the shell is not running, which is what you want from a hotkey.
+
+`SUPER SHIFT Q` is only a suggestion; check it is free with
+`omarchy menu keybindings` first. Press the same key again to put it away, or
+`Esc` from inside the game.
+
+Once it is open: `?` for help, `~` for the console, `/godmode` to watch it play
+itself.
+
+The overlay covers one monitor, not all of them — the same as Omarchy's own
+emoji picker and clipboard, which do not use `Variants` either.
 
 ## Remove it
 
