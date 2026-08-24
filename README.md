@@ -40,7 +40,14 @@ omarchy plugin add https://github.com/mic-kul/quakattro.git --enable
 Then bind it in `~/.config/hypr/bindings.conf`:
 
 ```
-bindd = SUPER SHIFT, Q, Quakattro, exec, omarchy-shell -q shell toggle quakattro
+bindd = SUPER SHIFT, Q, Quakattro, exec, omarchy-shell -q shell toggle quakattro '{}'
+```
+
+The `'{}'` is not optional — the shell's IPC method is `toggle(id, payload)`,
+and leaving the payload off silently does nothing. To try it without a keybind:
+
+```sh
+omarchy-shell shell toggle quakattro '{}'
 ```
 
 `omarchy plugin list` shows what is installed, and `omarchy plugin disable
